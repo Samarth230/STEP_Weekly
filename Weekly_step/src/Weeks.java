@@ -1,155 +1,246 @@
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-public class Hash {
-    // Problem 1
-    static class UsernameChecker {
-        private Map<String, Integer> userMap = new HashMap<>();
-        private Map<String, Integer> attemptFrequency = new HashMap<>();
-        public boolean checkAvailability(String username) {
-            attemptFrequency.put(username, attemptFrequency.getOrDefault(username, 0) + 1);
-            return !userMap.containsKey(username);
+
+public class Main {
+
+    // ===================== PROBLEM 6: RATE LIMITER =====================
+    static class TokenBucket {
+        int tokens, maxTokens, refillRate;
+        long lastRefill;
+
+        TokenBucket(int maxTokens, int refillRate) {
+            this.maxTokens = maxTokens;
+            this.refillRate = refillRate;
+            this.tokens = maxTokens;
+            this.lastRefill = System.currentTimeMillis();
         }
-        public void registerUser(String username, int userId) {
-            userMap.put(username, userId);
-        }
-        public List<String> suggestAlternatives(String username) {
-            List<String> suggestions = new ArrayList<>();
-            for (int i = 1; i <= 3; i++) {
-                String alt = username + i;
-                if (!userMap.containsKey(alt)) suggestions.add(alt);
+
+        synchronized boolean allowRequest() {
+            long now = System.currentTimeMillis();
+            long seconds = (now - lastRefill) / 1000;
+            if (seconds > 0) {
+                tokens = Math.min(maxTokens, tokens + (int)(seconds * refillRate));
+                lastRefill = now;
             }
-            suggestions.add(username.replace("_", "."));
-            return suggestions;
-        }
-        public String getMostAttempted() {
-            return attemptFrequency.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey).orElse(null);
+            if (tokens > 0) {
+                tokens--;
+                return true;
+            }
+            return false;
         }
     }
-    // Problem 2
-    static class InventoryManager {
-        private Map<String, AtomicInteger> stock = new HashMap<>();
-        private Map<String, Queue<Integer>> waitingList = new HashMap<>();
-        public void addProduct(String productId, int count) {
-            stock.put(productId, new AtomicInteger(count));
-            waitingList.put(productId, new LinkedList<>());
+
+    static class RateLimiter {
+        ConcurrentHashMap<String, TokenBucket> map = new ConcurrentHashMap<>();
+
+        boolean check(String clientId) {
+            map.putIfAbsent(clientId, new TokenBucket(1000, 1000 / 3600));
+            return map.get(clientId).allowRequest();
         }
-        public String purchaseItem(String productId, int userId) {
-            AtomicInteger count = stock.get(productId);
-            if (count.get() > 0) {
-                count.decrementAndGet();
-                return "Success, " + count.get() + " units remaining";
-            } else {
-                waitingList.get(productId).add(userId);
-                return "Added to waiting list, position #" + waitingList.get(productId).size();
+    }
+
+    // ===================== PROBLEM 7: AUTOCOMPLETE =====================
+    static class TrieNode {
+        Map<Character, TrieNode> children = new HashMap<>();
+        Map<String, Integer> freqMap = new HashMap<>();
+        boolean isEnd;
+    }
+
+    static class Autocomplete {
+        TrieNode root = new TrieNode();
+
+        void insert(String word) {
+            TrieNode node = root;
+            for (char c : word.toCharArray()) {
+                node.children.putIfAbsent(c, new TrieNode());
+                node = node.children.get(c);
+                node.freqMap.put(word, node.freqMap.getOrDefault(word, 0) + 1);
+            }
+            node.isEnd = true;
+        }
+
+        List<String> search(String prefix) {
+            TrieNode node = root;
+            for (char c : prefix.toCharArray()) {
+                if (!node.children.containsKey(c)) return new ArrayList<>();
+                node = node.children.get(c);
+            }
+            PriorityQueue<Map.Entry<String, Integer>> pq =
+                    new PriorityQueue<>((a, b) -> b.getValue() - a.getValue());
+            pq.addAll(node.freqMap.entrySet());
+            List<String> res = new ArrayList<>();
+            int k = 10;
+            while (!pq.isEmpty() && k-- > 0) res.add(pq.poll().getKey());
+            return res;
+        }
+    }
+
+    // ===================== PROBLEM 8: PARKING LOT =====================
+    static class ParkingLot {
+        String[] table;
+        int size;
+
+        ParkingLot(int size) {
+            this.size = size;
+            table = new String[size];
+        }
+
+        int hash(String plate) {
+            return Math.abs(plate.hashCode()) % size;
+        }
+
+        int park(String plate) {
+            int idx = hash(plate);
+            int probes = 0;
+            while (table[idx] != null) {
+                idx = (idx + 1) % size;
+                probes++;
+            }
+            table[idx] = plate;
+            return idx;
+        }
+
+        void exit(String plate) {
+            int idx = hash(plate);
+            while (table[idx] != null) {
+                if (table[idx].equals(plate)) {
+                    table[idx] = null;
+                    return;
+                }
+                idx = (idx + 1) % size;
             }
         }
-        public int checkStock(String productId) {
-            return stock.get(productId).get();
+    }
+
+    // ===================== PROBLEM 9: TWO SUM VARIANTS =====================
+    static class Transaction {
+        int id, amount;
+        String merchant, time;
+
+        Transaction(int id, int amount, String merchant, String time) {
+            this.id = id;
+            this.amount = amount;
+            this.merchant = merchant;
+            this.time = time;
         }
     }
-    //  Problem 3
-    static class DNSEntry {
-        String domain, ip;
-        long expiryTime;
-        DNSEntry(String domain, String ip, int ttl) {
-            this.domain = domain;
-            this.ip = ip;
-            this.expiryTime = System.currentTimeMillis() + ttl * 1000;
+
+    static List<int[]> twoSum(List<Transaction> list, int target) {
+        Map<Integer, Integer> map = new HashMap<>();
+        List<int[]> res = new ArrayList<>();
+        for (Transaction t : list) {
+            if (map.containsKey(target - t.amount)) {
+                res.add(new int[]{map.get(target - t.amount), t.id});
+            }
+            map.put(t.amount, t.id);
         }
-        boolean isExpired() {
-            return System.currentTimeMillis() > expiryTime;
-        }
+        return res;
     }
-    static class DNSCache {
-        private Map<String, DNSEntry> cache = new HashMap<>();
-        private int hits = 0, misses = 0;
-        public String resolve(String domain) {
-            DNSEntry entry = cache.get(domain);
-            if (entry == null || entry.isExpired()) {
-                misses++;
-                String ip = queryUpstream(domain);
-                cache.put(domain, new DNSEntry(domain, ip, 5)); // TTL 5s for demo
-                return ip + " (MISS)";
-            } else {
-                hits++;
-                return entry.ip + " (HIT)";
+
+    static List<List<Integer>> kSum(int[] nums, int target, int k) {
+        List<List<Integer>> res = new ArrayList<>();
+        Arrays.sort(nums);
+        kSumHelper(nums, target, k, 0, new ArrayList<>(), res);
+        return res;
+    }
+
+    static void kSumHelper(int[] nums, int target, int k, int start,
+                           List<Integer> path, List<List<Integer>> res) {
+        if (k == 2) {
+            int l = start, r = nums.length - 1;
+            while (l < r) {
+                int sum = nums[l] + nums[r];
+                if (sum == target) {
+                    List<Integer> temp = new ArrayList<>(path);
+                    temp.add(nums[l]);
+                    temp.add(nums[r]);
+                    res.add(temp);
+                    l++; r--;
+                } else if (sum < target) l++;
+                else r--;
+            }
+        } else {
+            for (int i = start; i < nums.length; i++) {
+                path.add(nums[i]);
+                kSumHelper(nums, target - nums[i], k - 1, i + 1, path, res);
+                path.remove(path.size() - 1);
             }
         }
-        private String queryUpstream(String domain) {
-            return "172.217." + new Random().nextInt(255) + "." + new Random().nextInt(255);
+    }
+
+    // ===================== PROBLEM 10: MULTI LEVEL CACHE =====================
+    static class LRUCache {
+        int capacity;
+        LinkedHashMap<String, String> map;
+
+        LRUCache(int capacity) {
+            this.capacity = capacity;
+            this.map = new LinkedHashMap<>(capacity, 0.75f, true) {
+                protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+                    return size() > capacity;
+                }
+            };
         }
-        public String getStats() {
-            return "Hit Rate: " + (100.0 * hits / (hits + misses)) + "%";
+
+        String get(String key) {
+            return map.getOrDefault(key, null);
+        }
+
+        void put(String key, String value) {
+            map.put(key, value);
         }
     }
-    // Problem 4
-    static class PlagiarismDetector {
-        private Map<String, Set<String>> nGramIndex = new HashMap<>();
-        public void indexDocument(String docId, String text, int n) {
-            String[] words = text.split(" ");
-            for (int i = 0; i <= words.length - n; i++) {
-                String nGram = String.join(" ", Arrays.copyOfRange(words, i, i + n));
-                nGramIndex.computeIfAbsent(nGram, k -> new HashSet<>()).add(docId);
+
+    static class MultiLevelCache {
+        LRUCache l1 = new LRUCache(10000);
+        LRUCache l2 = new LRUCache(100000);
+        Map<String, String> db = new HashMap<>();
+
+        String get(String key) {
+            String val = l1.get(key);
+            if (val != null) return "L1 HIT";
+
+            val = l2.get(key);
+            if (val != null) {
+                l1.put(key, val);
+                return "L2 HIT -> Promoted";
             }
-        }
-        public double analyze(String docId, String text, int n) {
-            int matches = 0, total = 0;
-            String[] words = text.split(" ");
-            for (int i = 0; i <= words.length - n; i++) {
-                total++;
-                String nGram = String.join(" ", Arrays.copyOfRange(words, i, i + n));
-                if (nGramIndex.containsKey(nGram)) matches++;
+
+            val = db.get(key);
+            if (val != null) {
+                l2.put(key, val);
+                return "DB HIT -> Added to L2";
             }
-            return (matches * 100.0) / total;
+
+            return "MISS";
         }
     }
-    // Problem 5
-    static class AnalyticsDashboard {
-        private Map<String, Integer> pageViews = new HashMap<>();
-        private Map<String, Set<String>> uniqueVisitors = new HashMap<>();
-        private Map<String, Integer> trafficSources = new HashMap<>();
-        public void processEvent(String url, String userId, String source) {
-            pageViews.put(url, pageViews.getOrDefault(url, 0) + 1);
-            uniqueVisitors.computeIfAbsent(url, k -> new HashSet<>()).add(userId);
-            trafficSources.put(source, trafficSources.getOrDefault(source, 0) + 1);
-        }
-        public void getDashboard() {
-            pageViews.entrySet().stream()
-                    .sorted((a, b) -> b.getValue() - a.getValue())
-                    .limit(10)
-                    .forEach(e -> System.out.println(e.getKey() + " - " + e.getValue() +
-                            " views (" + uniqueVisitors.get(e.getKey()).size() + " unique)"));
-            System.out.println("Traffic Sources: " + trafficSources);
-        }
-    }
+
     public static void main(String[] args) {
-        // Problem 1
-        UsernameChecker checker = new UsernameChecker();
-        checker.registerUser("john_doe", 1);
-        System.out.println("Availability of john_doe: " + checker.checkAvailability("john_doe"));
-        System.out.println("Suggestions: " + checker.suggestAlternatives("john_doe"));
-        // Problem 2
-        InventoryManager inv = new InventoryManager();
-        inv.addProduct("IPHONE15", 2);
-        System.out.println(inv.purchaseItem("IPHONE15", 101));
-        System.out.println(inv.purchaseItem("IPHONE15", 102));
-        System.out.println(inv.purchaseItem("IPHONE15", 103));
-        // Problem 3
-        DNSCache dns = new DNSCache();
-        System.out.println(dns.resolve("google.com"));
-        System.out.println(dns.resolve("google.com"));
-        System.out.println(dns.getStats());
-        // Problem 4
-        PlagiarismDetector pd = new PlagiarismDetector();
-        pd.indexDocument("doc1", "this is a test document", 2);
-        double sim = pd.analyze("doc2", "this is another test", 2);
-        System.out.println("Similarity: " + sim + "%");
-        // Problem 5
-        AnalyticsDashboard dash = new AnalyticsDashboard();
-        dash.processEvent("/article/news", "user1", "google");
-        dash.processEvent("/article/news", "user2", "facebook");
-        dash.getDashboard();
+
+        RateLimiter rl = new RateLimiter();
+        System.out.println("RateLimiter: " + rl.check("abc"));
+
+        Autocomplete ac = new Autocomplete();
+        ac.insert("tutorial");
+        ac.insert("script");
+        ac.insert("download");
+        System.out.println("Autocomplete: " + ac.search("tu"));
+
+        ParkingLot pl = new ParkingLot(500);
+        int spot = pl.park("ABC123");
+        System.out.println("Parked at: " + spot);
+
+        List<Transaction> tx = Arrays.asList(
+                new Transaction(1, 500, "A", "10:00"),
+                new Transaction(2, 300, "B", "10:15"),
+                new Transaction(3, 200, "C", "10:30")
+        );
+        System.out.println("TwoSum: " + twoSum(tx, 500).size());
+
+        MultiLevelCache cache = new MultiLevelCache();
+        cache.db.put("video1", "data");
+        System.out.println("Cache: " + cache.get("video1"));
     }
 }
